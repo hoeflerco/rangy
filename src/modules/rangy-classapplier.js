@@ -55,8 +55,25 @@ rangy.createModule("ClassApplier", ["WrappedSelection"], function(api, module) {
         }
     }
 
+    function getNamespacedClass(classList, className) {
+        // Get the namespaced prefix for the class passed in
+        var explodedClassName = className.split('__');
+        // If the className contains a prefixed name…
+        if (explodedClassName.length > 1) {
+            var findIndex = require('lodash/findIndex');
+            var thePrefix = explodedClassName[0] + '__';
+            var indexOfSimilarClass = findIndex(classList, function(o) {
+                return o.indexOf(thePrefix) > -1;
+            });
+            if (indexOfSimilarClass > -1) return classList[indexOfSimilarClass];
+            return false;
+        }
+    }
+
     function addClass(el, className) {
         if (typeof el.classList == "object") {
+            var previousNamespacedClass = getNamespacedClass(el.classList, className);
+            if (previousNamespacedClass) el.classList.remove(previousNamespacedClass);
             el.classList.add(className);
         } else {
             var classNameSupported = (typeof el.className == "string");
@@ -750,6 +767,19 @@ rangy.createModule("ClassApplier", ["WrappedSelection"], function(api, module) {
             log.groupEnd();
         },
 
+        canUseCurrentContainer: function(win) {
+            var sel = api.getSelection(win);
+            if (sel.rangeCount > 0) {
+                var range = sel.getRangeAt(0);
+                var parentElement = range.commonAncestorContainer;
+                if (parentElement.nodeType == 3) {
+                    parentElement = parentElement.parentNode;
+                }
+                if (range.containsNodeText(parentElement)) return true;
+            }
+            return false;
+        },
+
         createContainer: function(parentNode) {
             log.debug("createContainer with namespace " + parentNode.namespaceURI);
             var doc = dom.getDocument(parentNode);
@@ -802,12 +832,13 @@ rangy.createModule("ClassApplier", ["WrappedSelection"], function(api, module) {
             // should not be styled. See issue 283.
             if (canTextBeStyled(textNode)) {
                 var parent = textNode.parentNode;
-                if (parent.childNodes.length == 1 &&
+                if (
+                    this.canUseCurrentContainer() &&
+                    parent.childNodes.length == 1 &&
                     this.useExistingElements &&
-                    this.appliesToElement(parent) &&
                     this.elementHasProperties(parent, this.elementProperties) &&
-                    this.elementHasAttributes(parent, this.elementAttributes)) {
-
+                    this.elementHasAttributes(parent, this.elementAttributes)
+                ) {
                     addClass(parent, this.className);
                 } else {
                     var textNodeParent = textNode.parentNode;
@@ -915,8 +946,13 @@ rangy.createModule("ClassApplier", ["WrappedSelection"], function(api, module) {
             if (textNodes.length) {
                 forEach(textNodes, function(textNode) {
                     log.info("textnode " + textNode.data + " is ignorable: " + applier.isIgnorableWhiteSpaceNode(textNode));
-                    if (!applier.isIgnorableWhiteSpaceNode(textNode) && !applier.getSelfOrAncestorWithClass(textNode) &&
-                            applier.isModifiable(textNode)) {
+                    if (applier.getSelfOrAncestorWithClass(textNode)) {
+                        addClass(textNode.parentNode, applier.className);
+                        applier.removeEmptyContainers(range);
+                    } else if (
+                        !applier.isIgnorableWhiteSpaceNode(textNode) &&
+                        applier.isModifiable(textNode)
+                    ) {
                         applier.applyToTextNode(textNode, positionsToPreserve);
                     }
                 });
